@@ -1,0 +1,5 @@
+data/
+
+#heavy pkl files
+*.pkl
+*.xlsx
