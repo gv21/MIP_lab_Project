@@ -23,32 +23,23 @@ def transform_rdm(dictionary_data):
         arrays[data_type] = dictionary_data[data_type].values[mask]  # Convert dataframe to array and mask
     return arrays
 
-# Function to generate null distribution
 def null_dist(paired_data, perms=500):
-    #print('rng')
+    #make a copy of the data
+    shuffle_data = paired_data
+    #shuffle fMRI data rows independently
+    size= len(shuffle_data['behavior'])
     rng = np.random.default_rng()
-    #print('shuffle')
-    shuffle_data = paired_data  # Copy to new dataframe as some functions may apply directly to original data
-    #print('max')
-    num_sub_comparisons = np.max(shuffle_data.index.values)  # Base comparisons off data as this varies (dropped na)
-    #print('shuffled_corr')
-    shuffled_corr = np.full(perms, np.nan)  # Empty array for null distribution
-
-    for perm_idx in range(0, perms):
-        #print(perm_idx)
-        # Shuffle fMRI data
-        sublist_a = rng.choice(num_sub_comparisons, size=num_sub_comparisons, replace=False)
-        shuffle_data['fMRI'] = shuffle_data['fMRI'].iloc[sublist_a].reset_index(drop=True)
-
-        """shuffled_corr[perm_idx] = pg.partial_corr(data=shuffle_data, x="fMRI", y="behavior",
-                                                  covar=["age", "sex", "movement"], method='spearman')["r"][0]"""
-        # Run correlation #He used pg.partial_corr, as I don't have covariate I will only use pg.corr
-        shuffled_corr[perm_idx] = pg.corr(x=shuffle_data['fMRI'], y=shuffle_data['behavior'],
-                                                  method='spearman')["r"][0] #x, y = names of column in data; covar = name of covariate in data ->remove it
-
+    r = np.tile(rng.choice(size, size=size, replace=False), (perms,1))
+    r = rng.permuted(r, axis=1)
+    fMRI_shuffled = np.take(np.array(shuffle_data['fMRI']), r, axis=0)
+    #repeat behvaior data for each row of fMRI data
+    behavior_array= np.tile(np.array(shuffle_data['behavior']),(perms,1))
+    arr=np.concatenate((fMRI_shuffled, behavior_array), axis=1)
+    #compute the correlation for each pair fMRI and behavior
+    shuffled_corr = np.apply_along_axis(lambda x: pg.corr(x=x[:size], y=x[size:], method='spearman')["r"][0], axis=1, arr=np.concatenate((fMRI_shuffled, behavior_array), axis=1))
     return shuffled_corr
 
-# Function to generate null distribution for suspense ratings
+"""# Function to generate null distribution for suspense ratings
 def null_dist_pearson(x, y, perms=500): #perms = je ne sais pas trop quoi, à quoi correspond la valeur par défaut?
     rng = np.random.default_rng()
     shuffled_corr = np.full(perms, np.nan)  # Empty array for null distribution
@@ -61,7 +52,7 @@ def null_dist_pearson(x, y, perms=500): #perms = je ne sais pas trop quoi, à qu
         # Run correlation
         shuffled_corr[perm_idx] = pg.corr(x_new, y, method="pearson")["r"][0]
 
-    return shuffled_corr
+    return shuffled_corr"""
 
 print('Load data')
 # Load  data
@@ -71,6 +62,13 @@ behavioral_arrays = transform_rdm(pairwise_data["behavior"])  # Transform behavi
 fMRI_arrays = transform_rdm(pairwise_data["fMRI"])
 pkl_file.close()
 
+# Initialize variables
+#subjects = len(pairwise_data['fMRI']['Left Amygdala_x_7Networks_LH_SalVentAttn_Med_1']) #take on brain region combination at random
+
+"""ATTENTION LE VRAI NOMBRE DE PERMUTATION EST 10 000"""
+num_perms = 500 ###nbr of permutation to build the distribution 
+#statistical_tests = pd.DataFrame(columns=["Behavior", "Connection", "r", "p", "perm_p"])
+#suspense_tests = {}
 
 def computation_movie_wise(behavior, connection):
     behavioral_data = behavioral_arrays[behavior]
@@ -83,7 +81,7 @@ def computation_movie_wise(behavior, connection):
             np.absolute(pairwise_dataframe.loc[:, pairwise_dataframe.columns != 'fMRI'])
     correlation = pg.corr(x=pairwise_dataframe['fMRI'], y=pairwise_dataframe['behavior'], method='spearman')
 
-    null_distribution = null_dist(pairwise_dataframe)
+    null_distribution = null_dist(pairwise_dataframe, perms = num_perms)
     # Test Fisher transformed correlations. Absolute null z less then absolute observed z
     greater_less_sum = np.sum(np.absolute(np.arctanh(null_distribution)) <= np.absolute(np.arctanh(correlation.r[0])))  ###compte le nombre de fois que 
     ###la valeur que l'on veut tester est plus petite que la valeur significative
@@ -93,13 +91,6 @@ def computation_movie_wise(behavior, connection):
                           columns = ["Behavior", "Connection", "r", "p", "perm_p"])
     
     return new_df
-
-
-# Initialize variables
-subjects = len(pairwise_data['fMRI']['Left Amygdala_x_7Networks_LH_SalVentAttn_Med_1']) #take on brain region combination at random
-num_perms = 10000 ###nbr of permutation to build the distribution
-#statistical_tests = pd.DataFrame(columns=["Behavior", "Connection", "r", "p", "perm_p"])
-suspense_tests = {}
 
 
 #Select only the region of interest 
@@ -117,8 +108,9 @@ print('Movie wise')
 connection_x_behavior = list(product(list(behavioral_arrays.keys()), fMRI_name_selected)) 
 print(len(connection_x_behavior))
 start_time = time.time()
-with Pool (processes=90) as pool: #processes = number of thread (coeur) I use on my computer
-    result = pool.starmap(computation_movie_wise, connection_x_behavior[:176928]) #10% des données que j'ai
+nbr = multiprocessing.cpu_count()
+with Pool (processes=nbr) as pool: #processes = number of thread (coeur) I use on my computer
+    result = pool.starmap(computation_movie_wise, connection_x_behavior) 
 statistical_tests = pd.concat((result), axis =0, ignore_index=True)
 time_ = (time.time() - start_time)
 heures = (time_ % (24 * 3600)) // 3600
@@ -127,10 +119,10 @@ secondes = time_ % 60
 print("Cela a pris {} heures, {} minutes, et {} secondes.".format(int(heures), int(minutes), round(secondes, 2)))
 
 print('Save movie wise results')
-pkl_file = open("Computation/Group/amygd_Movie_wise_group_analysis.pkl", "wb")
+pkl_file = open("Computation/Group/all_amygd_Movie_wise_group_analysis_500_perms.pkl", "wb")
 pickle.dump(statistical_tests, pkl_file)
 pkl_file.close()
-statistical_tests.to_csv('amygd_Movie_wise_group_analysis.csv', index=False)
+statistical_tests.to_csv('Computation/Group/all_amygd_Movie_wise_group_analysis_500_perms.csv', index=False)
 
 #Au cas où la deuxième partie se passe mal
 """pkl_file = open("Computation/Group/Movie_wise_group_analysis.pkl", "rb")
