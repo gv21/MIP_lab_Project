@@ -119,9 +119,9 @@ secondes = time_ % 60
 print("Cela a pris {} heures, {} minutes, et {} secondes.".format(int(heures), int(minutes), round(secondes, 2)))
 
 print('Save movie wise results')
-pkl_file = open('Computation/Group/'+region_interest + '_all_' + region_interest+'_Movie_wise_group_analysis_500_perms.pkl', "wb")
+pkl_file = open('Computation/Group/'+region_interest + '/all_' + region_interest+'_Movie_wise_group_analysis_500_perms.pkl', "wb")
 pickle.dump(statistical_tests, pkl_file)
 pkl_file.close()
-statistical_tests.to_csv('Computation/Group/'+region_interest + '_all_' + region_interest+'_Movie_wise_group_analysis_500_perms.csv', index=False)
+statistical_tests.to_csv('Computation/Group/'+region_interest + '/all_' + region_interest+'_Movie_wise_group_analysis_500_perms.csv', index=False)
 
 
